@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -205,7 +205,37 @@ static void fl_load_token(ctx_t *x, yxml_ret_t r, GError **err) {
 }
 
 
-static fl_list_t *fl_load_parse(FILE *fh, BZFILE *bzfh, gboolean local, GError **err) {
+static int fl_load_readbz(bz_stream *bzs, int fd, char *bzbuf, GError **err) {
+  int buflen;
+
+  bzs->next_in = bzbuf;
+  if(bzs->avail_in == 0) {
+    buflen = read(fd, bzs->next_in + bzs->avail_in, READBUFSIZE - bzs->avail_in);
+    if(buflen == 0)
+      return -1;
+    if(buflen < 0) {
+      g_set_error(err, 1, 0, "Read error: %s", g_strerror(errno));
+      return -1;
+    }
+    bzs->avail_in += buflen;
+  }
+
+  int bzerr = BZ2_bzDecompress(bzs);
+  if(bzerr == BZ_STREAM_END) {
+    BZ2_bzDecompressEnd(bzs);
+    BZ2_bzDecompressInit(bzs, 0, 0);
+  } else if(bzerr != BZ_OK) {
+    g_set_error(err, 1, 0, "bzip2 decompression error (%d): %s", bzerr, g_strerror(errno));
+    return -1;
+  }
+
+  memmove(bzbuf, bzs->next_in, bzs->avail_in);
+  bzs->next_in = bzbuf;
+  return READBUFSIZE-bzs->avail_out;
+}
+
+
+static fl_list_t *fl_load_parse(int fd, bz_stream *bzs, gboolean local, GError **err) {
   ctx_t *x = g_new(ctx_t, 1);
   x->state = S_START;
   x->root = fl_list_create("", FALSE);
@@ -219,24 +249,21 @@ static fl_list_t *fl_load_parse(FILE *fh, BZFILE *bzfh, gboolean local, GError *
 
   yxml_init(&x->x, x->stack, STACKSIZE);
   int buflen = 0;
-  int bzeof = 0;
+  char *bzbuf = NULL;
 
   while(1) {
     // Fill buffer
-    if(bzfh) {
-      if(bzeof)
+    if(bzs) {
+      if(!bzbuf)
+        bzbuf = g_malloc(READBUFSIZE);
+      bzs->next_out = x->buf;
+      bzs->avail_out = READBUFSIZE;
+      buflen = fl_load_readbz(bzs, fd, bzbuf, err);
+      if(buflen < 0)
         break;
-      int bzerr;
-      buflen = BZ2_bzRead(&bzerr, bzfh, x->buf, READBUFSIZE);
-      if(bzerr == BZ_STREAM_END)
-        bzeof = 1;
-      else if(bzerr != BZ_OK) {
-        g_set_error(err, 1, 0, "bzip2 decompression error (%d): %s", bzerr, g_strerror(errno));
-        break;
-      }
     } else {
-      buflen = fread(x->buf, 1, READBUFSIZE, fh);
-      if(buflen < 0 && feof(fh))
+      buflen = read(fd, x->buf, READBUFSIZE);
+      if(buflen == 0)
         break;
       if(buflen < 0) {
         g_set_error(err, 1, 0, "Read error: %s", g_strerror(errno));
@@ -268,6 +295,7 @@ static fl_list_t *fl_load_parse(FILE *fh, BZFILE *bzfh, gboolean local, GError *
     g_set_error_literal(err, 1, 0, "XML document did not end correctly");
 
   fl_list_t *root = x->root;
+  g_free(bzbuf);
   g_free(x->name);
   g_free(x);
   return root;
@@ -278,36 +306,32 @@ fl_list_t *fl_load(const char *file, GError **err, gboolean local) {
   g_return_val_if_fail(err == NULL || *err == NULL, NULL);
 
   fl_list_t *root = NULL;
-  FILE *fh;
-  BZFILE *bzfh = NULL;
+  int fd;
+  bz_stream *bzs = NULL;
   GError *ierr = NULL;
 
   // open file
-  fh = fopen(file, "r");
-  if(!fh) {
+  fd = open(file, O_RDONLY);
+  if(fd < 0) {
     g_set_error_literal(&ierr, 1, 0, g_strerror(errno));
     goto end;
   }
 
-  // open BZ2 decompression
+  // Create BZ2 stream object if this is a bzip2 file
   if(strlen(file) > 4 && strcmp(file+(strlen(file)-4), ".bz2") == 0) {
-    int bzerr;
-    bzfh = BZ2_bzReadOpen(&bzerr, fh, 0, 0, NULL, 0);
-    if(bzerr != BZ_OK) {
-      g_set_error(&ierr, 1, 0, "Unable to open bzip2 file (%d): %s", bzerr, g_strerror(errno));
-      goto end;
-    }
+    bzs = g_new0(bz_stream, 1);
+    BZ2_bzDecompressInit(bzs, 0, 0);
   }
 
-  root = fl_load_parse(fh, bzfh, local, &ierr);
+  root = fl_load_parse(fd, bzs, local, &ierr);
 
 end:
-  if(bzfh) {
-    int bzerr;
-    BZ2_bzReadClose(&bzerr, bzfh);
+  if(bzs) {
+    BZ2_bzDecompressEnd(bzs);
+    g_free(bzs);
   }
-  if(fh)
-    fclose(fh);
+  if(fd >= 0)
+    close(fd);
   if(ierr) {
     g_propagate_error(err, ierr);
     if(root)

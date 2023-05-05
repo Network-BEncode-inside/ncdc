@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -45,7 +45,7 @@ ui_tab_t *uit_main_create() {
   ui_mf(tab, 0, "Welcome to ncdc %s!", main_version);
   ui_m(tab, 0,
     "Check out the manual page for a general introduction to ncdc.\n"
-    "Make sure you always run the latest version available from http://dev.yorhel.nl/ncdc\n");
+    "Make sure you always run the latest version available from https://dev.yorhel.nl/ncdc\n");
   ui_mf(tab, 0, "Using working directory: %s", db_dir);
 
   return tab;

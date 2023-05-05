@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -98,6 +98,21 @@ void certificate_sha256(gnutls_datum_t cert, char *digest) {
   gsize len = 32;
   g_checksum_get_digest(ctx, (guchar *)digest, &len);
   g_checksum_free(ctx);
+}
+
+
+// Simple single-pass in-place AES-128-CBC encryption using a 16-byte zero'd IV.
+void crypt_aes128cbc(gboolean encrypt, const char *key, size_t keylen, char *data, size_t len) {
+  gnutls_cipher_hd_t ciph;
+  char iv[16] = {};
+  gnutls_datum_t ivd = { (unsigned char *)iv, 16 };
+  gnutls_datum_t keyd = { (unsigned char *)key, keylen };
+  gnutls_cipher_init(&ciph, GNUTLS_CIPHER_AES_128_CBC, &keyd, &ivd);
+  if(encrypt)
+    g_warn_if_fail(gnutls_cipher_encrypt(ciph, data, len) == 0);
+  else
+    g_warn_if_fail(gnutls_cipher_decrypt(ciph, data, len) == 0);
+  gnutls_cipher_deinit(ciph);
 }
 
 
@@ -743,7 +758,7 @@ char *darray_get_dat(char *v, int *l) {
 #define RCC_MAX  RCC_DOWN
 
 struct ratecalc_t {
-  GStaticMutex lock; // protects total, last, rate and burst
+  GMutex lock; // protects total, last, rate and burst
   gint64 total;
   gint64 last;
   int burst;
@@ -752,13 +767,13 @@ struct ratecalc_t {
 };
 
 #define ratecalc_reset(rc) do {\
-    g_static_mutex_lock(&((rc)->lock));\
+    g_mutex_lock(&((rc)->lock));\
     (rc)->total = (rc)->last = (rc)->rate = (rc)->burst = 0;\
-    g_static_mutex_unlock(&((rc)->lock));\
+    g_mutex_unlock(&((rc)->lock));\
   } while(0)
 
 #define ratecalc_init(rc) do {\
-    g_static_mutex_init(&((rc)->lock));\
+    g_mutex_init(&((rc)->lock));\
     ratecalc_unregister(rc);\
     ratecalc_reset(rc);\
   } while(0)
@@ -782,33 +797,33 @@ GSList *ratecalc_list = NULL;
 
 
 void ratecalc_add(ratecalc_t *rc, int b) {
-  g_static_mutex_lock(&rc->lock);
+  g_mutex_lock(&rc->lock);
   rc->total += b;
   rc->burst -= b;
-  g_static_mutex_unlock(&rc->lock);
+  g_mutex_unlock(&rc->lock);
 }
 
 
 int ratecalc_rate(ratecalc_t *rc) {
-  g_static_mutex_lock(&rc->lock);
+  g_mutex_lock(&rc->lock);
   int r = rc->rate;
-  g_static_mutex_unlock(&rc->lock);
+  g_mutex_unlock(&rc->lock);
   return r;
 }
 
 
 int ratecalc_burst(ratecalc_t *rc) {
-  g_static_mutex_lock(&rc->lock);
+  g_mutex_lock(&rc->lock);
   int r = rc->burst;
-  g_static_mutex_unlock(&rc->lock);
+  g_mutex_unlock(&rc->lock);
   return r;
 }
 
 
 gint64 ratecalc_total(ratecalc_t *rc) {
-  g_static_mutex_lock(&rc->lock);
+  g_mutex_lock(&rc->lock);
   gint64 r = rc->total;
-  g_static_mutex_unlock(&rc->lock);
+  g_mutex_unlock(&rc->lock);
   return r;
 }
 
@@ -833,7 +848,7 @@ void ratecalc_calc() {
   // Pass one: calculate rc->rate, substract negative burst values from left[] and calculate nums[].
   for(n=ratecalc_list; n; n=n->next) {
     ratecalc_t *rc = n->data;
-    g_static_mutex_lock(&rc->lock);
+    g_mutex_lock(&rc->lock);
     gint64 diff = rc->total - rc->last;
     rc->rate = diff + ((rc->rate - diff) / 2);
     rc->last = rc->total;
@@ -846,7 +861,7 @@ void ratecalc_calc() {
       nums[rc->reg]++;
     else
       rc->burst = maxburst[rc->reg];
-    g_static_mutex_unlock(&rc->lock);
+    g_mutex_unlock(&rc->lock);
   }
 
   //g_debug("Num: %d - %d - %d", nums[2], nums[3], nums[4]);
@@ -870,12 +885,12 @@ void ratecalc_calc() {
     for(n=ratecalc_list; n; n=n->next) {
       ratecalc_t *rc = n->data;
       if(bwp[rc->reg] > 0) {
-        g_static_mutex_lock(&rc->lock);
+        g_mutex_lock(&rc->lock);
         int alloc = MIN(maxburst[rc->reg]-rc->burst, bwp[rc->reg]);
         //g_debug("Allocing class %d(num=%d), %d new bytes to %d", rc->reg, nums[rc->reg], alloc, rc->burst);
         rc->burst += alloc;
         left[rc->reg] -= alloc;
-        g_static_mutex_unlock(&rc->lock);
+        g_mutex_unlock(&rc->lock);
         if(alloc > 0 && alloc < bwp[rc->reg])
           nums[rc->reg]--;
       }

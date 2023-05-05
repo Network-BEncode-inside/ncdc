@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -63,56 +63,9 @@
 #include <glib/gstdio.h>
 #include <gnutls/gnutls.h>
 #include <gnutls/x509.h>
-#ifdef USE_GCRYPT
-#include <gcrypt.h>
-#else
 #include <gnutls/crypto.h>
-#endif
 
+#ifndef _XOPEN_SOURCE_EXTENDED
 #define _XOPEN_SOURCE_EXTENDED
-#ifdef HAVE_NCURSESW_NCURSES_H
-#include <ncursesw/ncurses.h>
-#elif HAVE_NCURSES_NCURSES_H
-#include <ncurses/ncurses.h>
-#else
+#endif
 #include <ncurses.h>
-#endif
-
-#ifdef USE_GEOIP
-#include <GeoIP.h>
-#endif
-
-
-// GnuTLS / libgcrypt functions
-// crypt_aes128cbc() uses a 16-byte zero'd IV. Data is encrypted or decrypted in-place.
-#ifdef USE_GCRYPT
-#define crypt_rnd(buf, len) gcry_randomize(buf, len, GCRY_STRONG_RANDOM)
-#define crypt_nonce(buf, len) gcry_create_nonce(buf, len)
-static inline void crypt_aes128cbc(gboolean encrypt, const char *key, size_t keylen, char *data, size_t len) {
-  gcry_cipher_hd_t ciph;
-  char iv[16] = {};
-  gcry_cipher_open(&ciph, GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CBC, 0);
-  gcry_cipher_setkey(ciph, key, keylen);
-  gcry_cipher_setiv(ciph, iv, 16);
-  if(encrypt)
-    g_warn_if_fail(gcry_cipher_encrypt(ciph, data, len, NULL, 0) == 0);
-  else
-    g_warn_if_fail(gcry_cipher_decrypt(ciph, data, len, NULL, 0) == 0);
-  gcry_cipher_close(ciph);
-}
-#else
-#define crypt_rnd(buf, len) g_warn_if_fail(gnutls_rnd(GNUTLS_RND_RANDOM, buf, len) == 0)
-#define crypt_nonce(buf, len) g_warn_if_fail(gnutls_rnd(GNUTLS_RND_NONCE, buf, len) == 0)
-static inline void crypt_aes128cbc(gboolean encrypt, const char *key, size_t keylen, char *data, size_t len) {
-  gnutls_cipher_hd_t ciph;
-  char iv[16] = {};
-  gnutls_datum_t ivd = { (unsigned char *)iv, 16 };
-  gnutls_datum_t keyd = { (unsigned char *)key, keylen };
-  gnutls_cipher_init(&ciph, GNUTLS_CIPHER_AES_128_CBC, &keyd, &ivd);
-  if(encrypt)
-    g_warn_if_fail(gnutls_cipher_encrypt(ciph, data, len) == 0);
-  else
-    g_warn_if_fail(gnutls_cipher_decrypt(ciph, data, len) == 0);
-  gnutls_cipher_deinit(ciph);
-}
-#endif

@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2019 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the

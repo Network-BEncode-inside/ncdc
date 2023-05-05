@@ -1,4 +1,4 @@
-ncdc 1.19.1
+ncdc 1.23.1
 ===========
 
 DESCRIPTION
@@ -7,7 +7,7 @@ DESCRIPTION
   ncurses interface.
 
   Always make sure you run the latest version. You can check for updates and
-  find more information at http://dev.yorhel.nl/ncdc
+  find more information at https://dev.yorhel.nl/ncdc
 
 
 
@@ -18,11 +18,9 @@ REQUIREMENTS
   zlib
   bzip2
   sqlite  >= 3.3.9
-  glib    >= 2.24.0
-  gnutls  >= 2.4.0
-  geoip   >= 1.2.0 (optional)
-
-  If your gnutls is older than 3.0, you also need libgcrypt.
+  glib    >= 2.32.0
+  gnutls  >= 3.0
+  libmaxminddb (optional)
 
 
 
@@ -76,6 +74,6 @@ CROSS COMPILING
 CONTACT
 
   Email: projects@yorhel.nl
-    Web: http://dev.yorhel.nl/ncdc
+    Web: https://dev.yorhel.nl/ncdc
      DC: adc://dc.blicky.net:2780/ or adcs://dc.blicky.net:2780/
 

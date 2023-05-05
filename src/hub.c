@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -106,7 +106,7 @@ struct hub_t {
 
   // last info we sent to the hub
   char *nfo_desc, *nfo_conn, *nfo_mail, *nfo_ip;
-  unsigned char nfo_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
+  unsigned char nfo_slots, nfo_free_slots, nfo_h_norm, nfo_h_reg, nfo_h_op;
   guint64 nfo_share;
   guint16 nfo_udp_port;
   gboolean nfo_sup_tls, nfo_sup_sudp;
@@ -563,13 +563,13 @@ void hub_opencc(hub_t *hub, hub_user_t *u) {
   char token[14] = {};
   if(hub->adc) {
     char nonce[8];
-    crypt_nonce(nonce, 8);
+    g_warn_if_fail(gnutls_rnd(GNUTLS_RND_NONCE, nonce, 8) == 0);
     base32_encode_dat(nonce, token, 8);
   }
 
-  guint16 wanttls = var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
+  int tlspolicy = var_get_int(hub->id, VAR_tls_policy);
   int port = listen_hub_tcp(hub->id);
-  gboolean usetls = wanttls && u->hastls;
+  gboolean usetls = tlspolicy == VAR_TLSP_FORCE || (tlspolicy == VAR_TLSP_PREFER && u->hastls);
   char *adcproto = !usetls ? "ADC/1.0" : u->hasadc0 ? "ADCS/0.10" : "ADCS/1.0";
 
   // we're active, send CTM
@@ -668,19 +668,42 @@ void hub_search(hub_t *hub, search_q_t *q) {
 #define eq(a) (a == hub->nfo_##a)
 #define beq(a) (!!a == !!hub->nfo_##a)
 
+static unsigned char num_free_slots(unsigned char hub_slots) {
+  int rv = hub_slots - cc_slots_in_use(NULL);
+  return rv > 0 ? rv : 0;
+}
+
+static GString* format_desc(hub_t *hub, unsigned char free_slots) {
+  GString *desc;
+  const char *static_desc = var_get(hub->id, VAR_description);
+  if(var_get_bool(hub->id, VAR_show_free_slots)) {
+    desc = g_string_sized_new(128);
+    if(static_desc)
+      g_string_printf(desc, "[%d sl] %s", free_slots, static_desc);
+    else
+      g_string_printf(desc, "[%d sl]", free_slots);
+  } else
+    desc = g_string_new(static_desc);
+  return desc;
+}
+
 void hub_send_nfo(hub_t *hub) {
   if(!net_is_connected(hub->net))
     return;
 
   // get info, to be compared with hub->nfo_
   char *desc, *conn = NULL, *mail, *ip;
-  unsigned char slots, h_norm, h_reg, h_op;
+  unsigned char slots, free_slots, h_norm, h_reg, h_op;
   guint64 share;
   guint16 udp_port;
   gboolean sup_tls, sup_sudp;
+  GString *fmt_desc;
 
-  desc = var_get(hub->id, VAR_description);
   mail = var_get(hub->id, VAR_email);
+  slots = var_get_int(0, VAR_slots);
+  free_slots = num_free_slots(slots);
+  fmt_desc = format_desc(hub, free_slots);
+  desc = fmt_desc->str;
 
   char buf[50] = {};
   if(var_get_int(0, VAR_upload_rate)) {
@@ -703,7 +726,6 @@ void hub_send_nfo(hub_t *hub) {
     else
       h_norm++;
   }
-  slots = var_get_int(0, VAR_slots);
   ip = listen_hub_active(hub->id) ? hub_ip(hub) : NULL;
   udp_port = listen_hub_udp(hub->id);
   share = fl_local_list_size;
@@ -711,9 +733,11 @@ void hub_send_nfo(hub_t *hub) {
   sup_sudp = hub->tls && var_get_int(0, VAR_sudp_policy) != VAR_SUDPP_DISABLE ? TRUE : FALSE;
 
   // check whether we need to make any further effort
-  if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots) && streq(ip)
-      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(udp_port) && beq(sup_tls) && beq(sup_sudp))
+  if(hub->nick_valid && streq(desc) && streq(conn) && streq(mail) && eq(slots) && eq(free_slots) && streq(ip)
+      && eq(h_norm) && eq(h_reg) && eq(h_op) && eq(share) && eq(udp_port) && beq(sup_tls) && beq(sup_sudp)) {
+    g_string_free(fmt_desc, TRUE);
     return;
+  }
 
   char *nfo;
   // ADC
@@ -753,6 +777,8 @@ void hub_send_nfo(hub_t *hub) {
       g_string_append_printf(cmd, " SS%"G_GUINT64_FORMAT" SF%d", share, fl_local_list_length);
     if(f || !eq(slots))
       g_string_append_printf(cmd, " SL%d", slots);
+    if(f || !eq(free_slots))
+      g_string_append_printf(cmd, " FS%d", free_slots);
     if(f || !eq(h_norm))
       g_string_append_printf(cmd, " HN%d", h_norm);
     if(f || !eq(h_reg))
@@ -786,11 +812,12 @@ void hub_send_nfo(hub_t *hub) {
   g_free(nfo);
 
   // update
-  g_free(hub->nfo_desc); hub->nfo_desc = g_strdup(desc);
+  g_free(hub->nfo_desc); hub->nfo_desc = g_string_free(fmt_desc, FALSE);
   g_free(hub->nfo_conn); hub->nfo_conn = g_strdup(conn);
   g_free(hub->nfo_mail); hub->nfo_mail = g_strdup(mail);
   g_free(hub->nfo_ip);   hub->nfo_ip   = g_strdup(ip);
   hub->nfo_slots = slots;
+  hub->nfo_free_slots = free_slots;
   hub->nfo_h_norm = h_norm;
   hub->nfo_h_reg = h_reg;
   hub->nfo_h_op = h_op;
@@ -882,7 +909,7 @@ static void adc_sch_reply_send(hub_t *hub, net_udp_t *udp, GString *r, const cha
 
   // prepend 16 random bytes to message
   char nonce[16];
-  crypt_nonce(nonce, 16);
+  g_warn_if_fail(gnutls_rnd(GNUTLS_RND_NONCE, nonce, 16) == 0);
   g_string_prepend_len(r, nonce, 16);
 
   // use PKCS#5 padding to align the message length to the cypher block size (16)
@@ -1032,7 +1059,7 @@ static void adc_sch(hub_t *hub, adc_cmd_t *cmd) {
 // Many ways to say the same thing
 #define is_adcs_proto(p)  (strcmp(p, "ADCS/1.0") == 0 || strcmp(p, "ADCS/0.10") == 0 || strcmp(p, "ADC0/0.10") == 0)
 #define is_adc_proto(p)   (strcmp(p, "ADC/1.0") == 0  || strcmp(p, "ADC/0.10") == 0)
-#define is_valid_proto(p) (is_adc_proto(p) || is_adcs_proto(p))
+#define is_valid_proto(pol, p) ((pol) == VAR_TLSP_DISABLE ? is_adc_proto(p) : (pol) == VAR_TLSP_FORCE ? is_adcs_proto(p) : is_adc_proto(p) || is_adcs_proto(p))
 
 static void adc_handle(net_t *net, char *msg, int _len) {
   hub_t *hub = net_handle(net);
@@ -1170,7 +1197,7 @@ static void adc_handle(net_t *net, char *msg, int _len) {
   case ADCC_CTM:
     if(cmd.argc < 3 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_message("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(!is_valid_proto(var_get_int(hub->id, VAR_tls_policy), cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\sprotocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1199,7 +1226,7 @@ static void adc_handle(net_t *net, char *msg, int _len) {
   case ADCC_RCM:
     if(cmd.argc < 2 || cmd.type != 'D' || cmd.dest != hub->sid)
       g_message("Invalid message from %s: %s", net_remoteaddr(hub->net), msg);
-    else if(var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE ? !is_adc_proto(cmd.argv[0]) : !is_valid_proto(cmd.argv[0])) {
+    else if(!is_valid_proto(var_get_int(hub->id, VAR_tls_policy), cmd.argv[0])) {
       GString *r = adc_generate('D', ADCC_STA, hub->sid, cmd.source);
       g_string_append(r, " 141 Unknown\\protocol");
       adc_append(r, "PR", cmd.argv[0]);
@@ -1325,7 +1352,7 @@ static void adc_handle(net_t *net, char *msg, int _len) {
 // If port = 0, 'from' is interpreted as a nick. Otherwise, from should be an IP address.
 static void nmdc_search(hub_t *hub, char *from, unsigned short port, int size_m, guint64 size, int type, char *query) {
   int max = port ? 10 : 5;
-  fl_list_t *res[max];
+  fl_list_t *res[10];
   fl_search_t s = {};
   s.filedir = type == 1 ? 3 : type == 8 ? 2 : 1;
   s.ext = search_types[type].exts;
@@ -1445,7 +1472,7 @@ static void nmdc_handle(net_t *net, char *cmd, int _len) {
   if(g_regex_match(lock, cmd, 0, &nfo)) { // 1 = lock
     char *lock = g_match_info_fetch(nfo, 1);
     if(strncmp(lock, "EXTENDEDPROTOCOL", 16) == 0)
-      net_writestr(hub->net, "$Supports NoGetINFO NoHello UserIP2|");
+      net_writestr(hub->net, "$Supports NoGetINFO NoHello UserIP2 TLS|");
     char *key = nmdc_lock2key(lock);
     net_writef(hub->net, "$Key %s|", key);
     hub->nick = g_strdup(var_get(hub->id, VAR_nick));
@@ -1659,6 +1686,10 @@ static void nmdc_handle(net_t *net, char *cmd, int _len) {
       if(yuri_parse(addr, &uri) != 0 || *uri.scheme || uri.port == 0 ||
           uri.hosttype == YURI_DOMAIN || *uri.path || *uri.query || *uri.fragment)
         g_message("Invalid host:port in $ConnectToMe (%s)", addr);
+      else if(*tls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE)
+        g_message("$ConnectToMe from (%s) requires TLS, but TLS has been disabled in our tls_policy", addr);
+      else if(!*tls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_FORCE)
+        g_message("$ConnectToMe from (%s) without TLS, but TLS is required according to our tls_policy", addr);
       else
         cc_nmdc_connect(cc_create(hub), uri.host, uri.port, var_get(hub->id, VAR_local_address), *tls ? TRUE : FALSE);
     }
@@ -1677,11 +1708,13 @@ static void nmdc_handle(net_t *net, char *cmd, int _len) {
       g_message("Received a $RevConnectToMe for someone else (to %s from %s)", me, other);
     else if(!u)
       g_message("Received a $RevConnectToMe from someone not on the hub.");
+    else if(!u->hastls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_FORCE)
+      g_message("Received a $RevConnectToMe from client that does not support TLS.");
     else if(listen_hub_active(hub->id)) {
       // Unlike with ADC, the client sending the $RCTM can not indicate it
       // wants to use TLS or not, so the decision is with us. Let's require
-      // tls_policy to be PREFER here.
-      int usetls = u->hastls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_PREFER;
+      // tls_policy to be PREFER or FORCE here.
+      int usetls = u->hastls && (var_get_int(hub->id, VAR_tls_policy) & (VAR_TLSP_PREFER|VAR_TLSP_FORCE));
       int port = listen_hub_tcp(hub->id);
       net_writef(hub->net, net_is_ipv6(hub->net) ? "$ConnectToMe %s [%s]:%d%s|" : "$ConnectToMe %s %s:%d%s|",
           other, hub_ip(hub), port, usetls ? "S" : "");
@@ -1812,7 +1845,7 @@ hub_t *hub_create(ui_tab_t *tab) {
   // Get or create the hub id
   hub->id = db_vars_hubid(tab->name);
   if(!hub->id) {
-    crypt_rnd(&hub->id, 8);
+    g_warn_if_fail(gnutls_rnd(GNUTLS_RND_RANDOM, &hub->id, 8) == 0);
     var_set(hub->id, VAR_hubname, tab->name, NULL);
   }
 
@@ -1826,11 +1859,37 @@ hub_t *hub_create(ui_tab_t *tab) {
   return hub;
 }
 
+static void handle_fully_connected(hub_t *hub) {
+  net_set_keepalive(hub->net, hub->adc ? "\n" : "|");
 
-static void handle_handshake(net_t *n, const char *kpr) {
+  /* If we have a pre-configured active IP, make sure to enable active mode
+   * immediately. */
+  if(hub_ip(hub))
+    listen_refresh();
+
+  if(hub->adc)
+    net_writef(hub->net, "HSUP ADBASE ADTIGR%s\n", var_get_bool(hub->id, VAR_adc_blom) ? " ADBLO0 ADBLOM" : "");
+
+  // In the case that the joincomplete detection fails, consider the join to be
+  // complete anyway after a 2-minute timeout.
+  hub->joincomplete_timer = g_timeout_add_seconds(120, joincomplete_timer, hub);
+
+  // Start handling incoming messages
+  net_readmsg(hub->net, hub->adc ? '\n' : '|', hub->adc ? adc_handle : nmdc_handle);
+}
+
+static void handle_handshake(net_t *n, const char *kpr, int proto) {
   g_return_if_fail(kpr != NULL);
   hub_t *hub = net_handle(n);
   g_return_if_fail(!hub->kp);
+
+  if(proto == ALPN_NMDC) {
+    hub->adc = FALSE;
+    ui_mf(hub->tab, 0, "ALPN: negotiated NMDC.");
+  } else if(proto == ALPN_ADC) {
+    hub->adc = TRUE;
+    ui_mf(hub->tab, 0, "ALPN: negotiated ADC.");
+  }
 
   char kpf[53] = {};
   base32_encode_dat(kpr, kpf, 32);
@@ -1842,12 +1901,15 @@ static void handle_handshake(net_t *n, const char *kpr) {
   if(!old) {
     ui_mf(hub->tab, 0, "No previous TLS keyprint known. Storing `%s' for future validation.", kpf);
     var_set(hub->id, VAR_hubkp, kpf, NULL);
+    handle_fully_connected(hub);
     return;
   }
 
   // Keyprint matches? no problems!
-  if(strcmp(old, kpf) == 0)
+  if(strcmp(old, kpf) == 0) {
+    handle_fully_connected(hub);
     return;
+  }
 
   // Keyprint doesn't match... now we have a problem!
   ui_mf(hub->tab, UIP_HIGH,
@@ -1872,28 +1934,19 @@ static void handle_connect(net_t *n, const char *addr) {
     return;
   }
 
-  net_set_keepalive(n, hub->adc ? "\n" : "|");
   ui_mf(hub->tab, 0, "Connected to %s.", net_remoteaddr(n));
 
   if(hub->tls)
-    net_settls(hub->net, FALSE, handle_handshake);
+    net_settls(hub->net, FALSE, TRUE, handle_handshake);
   if(!net_is_connected(hub->net))
     return;
 
-  /* If we have a pre-configured active IP, make sure to enable active mode
-   * immediately. */
-  if(hub_ip(hub))
-    listen_refresh();
+  // TLS may negotiate a different protocol, and handle_handshake
+  // will eventually call handle_fully_connected as well.
+  if(hub->tls)
+    return;
 
-  if(hub->adc)
-    net_writef(hub->net, "HSUP ADBASE ADTIGR%s\n", var_get_bool(hub->id, VAR_adc_blom) ? " ADBLO0 ADBLOM" : "");
-
-  // In the case that the joincomplete detection fails, consider the join to be
-  // complete anyway after a 2-minute timeout.
-  hub->joincomplete_timer = g_timeout_add_seconds(120, joincomplete_timer, hub);
-
-  // Start handling incoming messages
-  net_readmsg(hub->net, hub->adc ? '\n' : '|', hub->adc ? adc_handle : nmdc_handle);
+  handle_fully_connected(hub);
 }
 
 
@@ -1905,6 +1958,12 @@ void hub_connect(hub_t *hub) {
     addr.port = 411;
   hub->adc = strncmp(addr.scheme, "adc", 3) == 0;
   hub->tls = strcmp(addr.scheme, "adcs") == 0 || strcmp(addr.scheme, "nmdcs") == 0;
+
+  if(!hub->tls && var_get_int(hub->id, VAR_tls_policy) == VAR_TLSP_FORCE) {
+    ui_mf(hub->tab, 0, "Refusing to connect to %s; tls_policy is set to 'force' but this is not a TLS address.", oaddr);
+    free(addr.buf);
+    return;
+  }
 
   if(hub->reconnect_timer) {
     g_source_remove(hub->reconnect_timer);

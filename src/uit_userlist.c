@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -168,8 +168,8 @@ static void draw_row(ui_listing_t *list, GSequenceIter *iter, int row, void *dat
 
   int j = 6;
   const char *cc =
-    !ip4_isany(user->ip4) ? geoip_country4(ip4_unpack(user->ip4)) :
-    !ip6_isany(user->ip6) ? geoip_country6(ip6_unpack(user->ip6)) : NULL;
+    !ip4_isany(user->ip4) ? geoip_country(ip4_sockaddr(user->ip4, 0)) :
+    !ip6_isany(user->ip6) ? geoip_country(ip6_sockaddr(user->ip6, 0)) : NULL;
   DRAW_COL(row, j, t->cw_country, cc?cc:"");
   if(t->cw_user > 1)
     ui_listing_draw_match(list, iter, row, j, str_offset_from_columns(user->name, t->cw_user-1));

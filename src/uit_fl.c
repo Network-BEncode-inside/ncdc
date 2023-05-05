@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -91,7 +91,7 @@ static void setdir(tab_t *t, fl_list_t *fl, fl_list_t *sel) {
     if(sel == g_ptr_array_index(fl->sub, i))
       seli = iter;
   }
-  t->list = ui_listing_create(seq, NULL, NULL, get_name);
+  t->list = ui_listing_create(seq, NULL, t, get_name);
   if(seli)
     t->list->sel = seli;
 }
@@ -329,13 +329,17 @@ static char *t_title(ui_tab_t *tab) {
 
 static void draw_row(ui_listing_t *list, GSequenceIter *iter, int row, void *dat) {
   fl_list_t *fl = g_sequence_get(iter);
+  tab_t *t = dat;
 
   attron(iter == list->sel ? UIC(list_select) : UIC(list_default));
   mvhline(row, 0, ' ', wincols);
   if(iter == list->sel)
     mvaddstr(row, 0, ">");
 
-  mvaddch(row, 2, fl->isfile && !fl->hastth ? 'H' :' ');
+  if(t->uid) // add shared/queued flags only while browsing others' lists.
+    mvaddch(row, 2, ui_file_flag(fl->tth));
+  else
+    mvaddch(row, 2, fl->isfile && !fl->hastth ? 'H' :' ');
 
   mvaddstr(row, 4, str_formatsize(fl->size));
   if(!fl->isfile)

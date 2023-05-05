@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -117,16 +117,8 @@ static void t_draw_row(ui_listing_t *list, GSequenceIter *iter, int row, void *d
     cc->state == CCS_IDLE      ? 'I' : cc->dl ? 'D' : 'U');
   mvaddch(row, 3, cc->tls ? 't' : ' ');
 
-  if(cc->nick)
-    mvaddnstr(row, 5, cc->nick, str_offset_from_columns(cc->nick, 15));
-  else {
-    char tmp[30];
-    strcpy(tmp, "IP:");
-    strcat(tmp, cc->remoteaddr);
-    if(strchr(tmp+3, ':'))
-      *(strchr(tmp+3, ':')) = 0;
-    mvaddstr(row, 5, tmp);
-  }
+  char *tmp = cc->nick ? cc->nick : cc->remoteaddr;
+  mvaddnstr(row, 5, tmp, str_offset_from_columns(tmp, 15));
 
   if(cc->hub)
     mvaddnstr(row, 21, cc->hub->tab->name, str_offset_from_columns(cc->hub->tab->name, 11));
@@ -334,6 +326,18 @@ static void t_key(ui_tab_t *tab, guint64 key) {
       else
         uit_dl_open(dl, cc->uid, tab);
     }
+    break;
+
+  case INPT_CHAR('b'): // b (/browse userlist)
+  case INPT_CHAR('B'): // B (force /browse userlist)
+    if(!cc)
+      ui_m(NULL, 0, "Nothing selected.");
+    else if(!cc->hub || !cc->uid)
+      ui_m(NULL, 0, "User or hub unknown.");
+    else if(!g_hash_table_lookup(hub_uids, &cc->uid))
+      ui_m(NULL, 0, "User is not online.");
+    else
+      uit_fl_queue(cc->uid, key == INPT_CHAR('B'), NULL, tab, TRUE, FALSE);
     break;
 
 #define S(num, name)\

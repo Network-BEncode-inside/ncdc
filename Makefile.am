@@ -1,6 +1,6 @@
 EXTRA_DIST=ChangeLog
 noinst_PROGRAMS=
-AM_CFLAGS=$(GLIB_CFLAGS) $(GNUTLS_CFLAGS) $(SQLITE_CFLAGS)
+AM_CFLAGS=${NCURSES_CFLAGS} $(GLIB_CFLAGS) $(GNUTLS_CFLAGS) $(SQLITE_CFLAGS)
 AM_CPPFLAGS=-I$(builddir)/src -I$(srcdir)/deps -I$(srcdir)/deps/ylib
 
 

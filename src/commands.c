@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -585,7 +585,7 @@ static void c_unshare(char *args) {
     listshares();
     return;
   // otherwise we may crash
-  } else if(fl_refresh_queue && fl_refresh_queue->head) {
+  } else if(fl_is_refreshing()) {
     ui_m(NULL, 0, "Sorry, can't remove directories from the share while refreshing.");
     return;
   }

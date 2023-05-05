@@ -168,6 +168,73 @@ C</help keys> command, and is reproduced below.
 @keys@
 
 
+=head1 WEIRD UI FLAGS
+
+Some listings have a flags display, and their meaning may not be immediately obvious.
+
+=head2 File status
+
+You may see one-letter flags to the left of file names in search results and
+file list tabs. Their meaning is as follows:
+
+=over
+
+=item H
+
+The file had been added to the file list, but has not been hashed yet and thus
+is not visible to others. This flag can appear only when browsing your own list.
+
+=item S
+
+The file is already in your share. If C<download_shared> is set to C<false>,
+trying to download it will result only in an informational message. This flag
+never appears when browsing your own file list.
+
+=item Q
+
+The file is currently in your download queue. Trying to download it will result
+only in an informational message.
+
+=back
+
+=head2 Connection flags
+
+On the connection list window, there are two flags:
+
+=over
+
+=item S
+
+Connection state, can be either B<C>onnecting, B<H>andshake, B<I>dle,
+B<D>ownloading, B<U>ploading or B<-> for disconnected.
+
+=item t
+
+This means that the connection is encrypted with TLS.
+
+=back
+
+=head2 User flags
+
+The user list has some flags too:
+
+=over
+
+=item o
+
+Set if the user is an operator in the hub.
+
+=item p
+
+When the user is passive. If this flag is not set, the user is active.
+
+=item t
+
+Set if connections with this user will be encrypted with TLS.
+
+=back
+
+
 =head1 ENVIRONMENT
 
 $NCDC_DIR is used to determine the session dir, it is only honoured if I<-c> is
@@ -321,7 +388,7 @@ see the same uploaded file several times with a different file offset.
 
 =head1 LICENSE
 
-Copyright (C) 2011-2013 Yoran Heling <projects@yorhel.nl>
+Copyright (C) 2011-2019 Yoran Heling <projects@yorhel.nl>
 
 ncdc is distributed under the MIT license, please read the COPYING file for
 more information.
@@ -329,7 +396,7 @@ more information.
 =head1 BUGS
 
 Please report bugs or feature requests to the bug tracker or the mailing list.
-Both can be found on the ncdc homepage at L<http://dev.yorhel.nl/ncdc>. There
+Both can be found on the ncdc homepage at L<https://dev.yorhel.nl/ncdc>. There
 is also an ADC hub available at C<adc://dc.blicky.net:2780/> for general
 support and discussions.
 
@@ -337,4 +404,4 @@ support and discussions.
 
 ncdc is written by Yoran Heling <projects@yorhel.nl>
 
-Web: L<http://dev.yorhel.nl/ncdc>
+Web: L<https://dev.yorhel.nl/ncdc>

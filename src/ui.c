@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -288,7 +288,7 @@ void ui_init(gboolean bracketed_paste) {
 
 
 static void ui_draw_status() {
-  if(fl_refresh_queue && fl_refresh_queue->head)
+  if(fl_is_refreshing())
     mvaddstr(winrows-1, 0, "[Refreshing share]");
   else if(fl_hash_queue && g_hash_table_size(fl_hash_queue))
     mvprintw(winrows-1, 0, "[Hashing: %d / %s / %.2f MiB/s]",
@@ -481,6 +481,14 @@ void ui_daychange(const char *day) {
   g_free(msg);
 }
 
+// Get the extra flag used to annotate files which are present in the download
+// queue (Q) or already shared (S). Currently used in file list and search tabs.
+char ui_file_flag(const char *tth) {
+  return
+    fl_local_from_tth(tth)             ? 'S' :
+    g_hash_table_lookup(dl_queue, tth) ? 'Q' :
+                                         ' ';
+}
 
 void ui_input(guint64 key) {
   ui_tab_t *curtab = ui_tab_cur->data;

@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -292,7 +292,7 @@ static int db_queue_process_begin(sqlite3 *db) {
 
 
 static void db_queue_process(sqlite3 *db) {
-  GTimeVal trans_end = {}; // tv_sec = 0 if no transaction is active
+  gint64 trans_end = 0; // 0 if no transaction is active
   gboolean donext = FALSE;
   gboolean errtrans = FALSE;
 
@@ -302,7 +302,7 @@ static void db_queue_process(sqlite3 *db) {
 
   while(1) {
     char *q =   donext ? g_async_queue_try_pop(db_queue) :
-      trans_end.tv_sec ? g_async_queue_timed_pop(db_queue, &trans_end) :
+             trans_end ? g_async_queue_timeout_pop(db_queue, trans_end - g_get_monotonic_time()) :
                          g_async_queue_pop(db_queue);
 
     int flags = q ? darray_get_int32(q) : 0;
@@ -311,9 +311,9 @@ static void db_queue_process(sqlite3 *db) {
     // Commit state if we need to
     if(!q || flags & DBF_SINGLE || flags & DBF_END) {
       g_warn_if_fail(!donext);
-      if(trans_end.tv_sec)
+      if(trans_end)
         db_queue_process_commit(db);
-      trans_end.tv_sec = 0;
+      trans_end = 0;
       donext = errtrans = FALSE;
     }
 
@@ -343,7 +343,7 @@ static void db_queue_process(sqlite3 *db) {
       donext = flags & DBF_NEXT ? TRUE : FALSE;
       if(!donext) {
         errtrans = FALSE;
-        trans_end.tv_sec = 0;
+        trans_end = 0;
       }
       g_free(q);
       continue;
@@ -351,15 +351,15 @@ static void db_queue_process(sqlite3 *db) {
 
     // handle LAST queries
     if(flags & DBF_LAST) {
-      r = db_queue_process_one(db, q, nocache, trans_end.tv_sec?TRUE:FALSE, &res, &lastid);
+      r = db_queue_process_one(db, q, nocache, trans_end?TRUE:FALSE, &res, &lastid);
       // Commit first, then send back the final result
-      if(trans_end.tv_sec) {
+      if(trans_end) {
         if(r == SQLITE_DONE)
           r = db_queue_process_commit(db);
         if(r != SQLITE_DONE)
           db_queue_process_rollback(db);
       }
-      trans_end.tv_sec = 0;
+      trans_end = 0;
       donext = FALSE;
       db_queue_item_final(res, r, lastid);
       g_free(q);
@@ -367,15 +367,14 @@ static void db_queue_process(sqlite3 *db) {
     }
 
     // start a new transaction for normal/NEXT queries
-    if(!trans_end.tv_sec) {
-      g_get_current_time(&trans_end);
-      g_time_val_add(&trans_end, DB_FLUSH_TIMEOUT);
+    if(!trans_end) {
+      trans_end = g_get_monotonic_time() + DB_FLUSH_TIMEOUT;
       r = db_queue_process_begin(db);
       if(r != SQLITE_DONE) {
         if(flags & DBF_NEXT)
           donext = errtrans = TRUE;
         else
-          trans_end.tv_sec = 0;
+          trans_end = 0;
         db_queue_item_error(q);
         g_free(q);
         continue;
@@ -393,7 +392,7 @@ static void db_queue_process(sqlite3 *db) {
       if(flags & DBF_NEXT)
         errtrans = TRUE;
       else
-        trans_end.tv_sec = 0;
+        trans_end = 0;
     }
   }
 }
@@ -1611,7 +1610,7 @@ void db_init() {
 
   // start database thread
   db_queue = g_async_queue_new();
-  db_thread = g_thread_create(db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL), TRUE, NULL);
+  db_thread = g_thread_new("database thread", db_thread_func, g_build_filename(db_dir, "db.sqlite3", NULL));
 
   db_init_schema();
 }

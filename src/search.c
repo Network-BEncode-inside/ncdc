@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -169,7 +169,7 @@ gboolean search_add(hub_t *hub, search_q_t *q, GError **err) {
   }
 
   if(var_get_int(0, VAR_sudp_policy) == VAR_SUDPP_PREFER)
-    crypt_nonce(q->key, 16);
+    g_warn_if_fail(gnutls_rnd(GNUTLS_RND_NONCE, q->key, 16) == 0);
 
   // Search a single hub
   if(hub) {

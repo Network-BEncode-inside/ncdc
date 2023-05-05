@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -470,15 +470,20 @@ static void xfer_log_add(cc_t *cc) {
 }
 
 
-// Returns the cc object of a connection with the same user, if there is one.
-static cc_t *cc_check_dupe(cc_t *cc) {
+// Returns true if the connection doesn't exceed maximum per-user connection limits.
+static gboolean cc_should_allow_connection(cc_t *cc) {
   GSequenceIter *i = g_sequence_get_begin_iter(cc_list);
+  int current_conns = 0;
+  const int max_conns = cc->dl ? 1 : var_get_int(cc->hub->id, VAR_max_ul_per_user);
   for(; !g_sequence_iter_is_end(i); i=g_sequence_iter_next(i)) {
     cc_t *c = g_sequence_get(i);
-    if(cc != c && c->state != CCS_DISCONN && !!c->adc == !!cc->adc && c->uid == cc->uid)
-      return c;
+    if(cc != c && c->state != CCS_DISCONN && !!c->adc == !!cc->adc && !!c->dl == !!cc->dl
+       && (c->cid && cc->cid ? strcmp(c->cid, cc->cid) == 0 : c->uid == cc->uid))
+      ++current_conns;
+    if(current_conns >= max_conns)
+      return false;
   }
-  return NULL;
+  return true;
 }
 
 
@@ -786,9 +791,11 @@ static void handle_adcget(cc_t *cc, char *type, char *id, guint64 start, gint64 
 }
 
 
-// To be called when we know with which user and on which hub this connection is.
+// To be called when we know with which user and on which hub this connection
+// is. May be called multiple times for the same connection.
 static void handle_id(cc_t *cc, hub_user_t *u) {
-  cc->nick = g_strdup(u->name);
+  if(!cc->nick)
+    cc->nick = g_strdup(u->name);
   cc->isop = u->isop;
   cc->uid = u->uid;
 
@@ -812,16 +819,27 @@ static void handle_id(cc_t *cc, hub_user_t *u) {
     }
   }
 
-  // Don't allow multiple connections with the same user for the same purpose
+  // Check the number of connections with the same user for the same purpose
   // (up/down).  For NMDC, the purpose of this connection is determined when we
   // receive a $Direction, so it's only checked here for ADC.
-  if(cc->adc) {
-    cc_t *dup = cc_check_dupe(cc);
-    if(dup && !!cc->dl == !!dup->dl) {
-      g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
-      cc_disconnect(cc, FALSE);
-      return;
-    }
+  if(cc->adc && !cc_should_allow_connection(cc)) {
+    g_set_error_literal(&(cc->err), 1, 0, "too many open connections with this user");
+    cc_disconnect(cc, FALSE);
+    return;
+  }
+
+  // Because tls_policy is a hub-local setting, we can only verify TLS settings
+  // for incoming connections once we know from which hub this connection came.
+  // The check is perhaps a bit late, but better disconnect late than never.
+  if(cc->tls && var_get_int(cc->hub->id, VAR_tls_policy) == VAR_TLSP_DISABLE) {
+    g_set_error_literal(&(cc->err), 1, 0, "TLS connection");
+    cc_disconnect(cc, FALSE);
+    return;
+  }
+  if(!cc->tls && var_get_int(cc->hub->id, VAR_tls_policy) == VAR_TLSP_FORCE) {
+    g_set_error_literal(&(cc->err), 1, 0, "non-TLS connection");
+    cc_disconnect(cc, FALSE);
+    return;
   }
 
   cc->slot_granted = db_users_get(u->hub->id, u->name) & DB_USERFLAG_GRANT ? TRUE : FALSE;
@@ -897,20 +915,21 @@ static void adc_handle(net_t *net, char *msg, int _len) {
         g_message("CC:%s: Incorrect CID: %s", net_remoteaddr(cc->net), msg);
         cc_disconnect(cc, TRUE);
         break;
-      } else if(cc->active) {
-        cc->token = g_strdup(token);
+      } else {
         cc->cid = g_strdup(id);
-        cc_expect_adc_rm(cc, 0);
+        if(cc->active) {
+          cc->token = g_strdup(token);
+          cc_expect_adc_rm(cc, 0);
+        }
         hub_user_t *u = cc->uid ? g_hash_table_lookup(hub_uids, &cc->uid) : NULL;
         if(!u) {
           g_set_error_literal(&cc->err, 1, 0, "Protocol error.");
           g_message("CC:%s: Unexpected ADC connection: %s", net_remoteaddr(cc->net), msg);
           cc_disconnect(cc, TRUE);
           break;
-        } else
-          handle_id(cc, u);
-      } else
-        cc->cid = g_strdup(id);
+        }
+        handle_id(cc, u);
+      }
       // Perform keyprint validation
       // TODO: Throw an error if kp_user is set but we've not received a kp_real?
       if(cc->kp_real && cc->kp_user && memcmp(cc->kp_real, cc->kp_user, 32) != 0) {
@@ -1123,9 +1142,8 @@ static void nmdc_direction(cc_t *cc, gboolean down, int num) {
   } else
     cc->dl = cc->dir > num;
 
-  // Now that this connection has a purpose, make sure it's the only connection with that purpose.
-  cc_t *dup = cc_check_dupe(cc);
-  if(dup && !!cc->dl == !!dup->dl) {
+  // Now that this connection has a purpose, check the connection number limit.
+  if(!cc_should_allow_connection(cc)) {
     g_set_error_literal(&cc->err, 1, 0, "Too many open connections with this user");
     cc_disconnect(cc, FALSE);
     return;
@@ -1351,7 +1369,7 @@ cc_t *cc_create(hub_t *hub) {
 
 // Simply stores the keyprint of the certificate in cc->kp_real, it will be
 // checked when receiving CINF.
-static void handle_handshake(net_t *n, const char *kpr) {
+static void handle_handshake(net_t *n, const char *kpr, int proto) {
   cc_t *c = net_handle(n);
   if(kpr) {
     if(!c->kp_real)
@@ -1375,7 +1393,7 @@ static void handle_connect(net_t *n, const char *addr) {
   }
 
   if(cc->tls)
-    net_settls(cc->net, FALSE, handle_handshake);
+    net_settls(cc->net, FALSE, FALSE, handle_handshake);
   if(!net_is_connected(cc->net))
     return;
 
@@ -1445,7 +1463,7 @@ static void handle_detectprotocol(net_t *net, char *dat, int len) {
   // Enable TLS
   if(!cc->tls && *dat >= 0x14 && *dat <= 0x17) {
     cc->tls = TRUE;
-    net_settls(cc->net, TRUE, handle_handshake);
+    net_settls(cc->net, TRUE, FALSE, handle_handshake);
     if(net_is_connected(cc->net))
       net_peekbytes(cc->net, 1, handle_detectprotocol); // Queue another detectprotocol to detect NMDC/ADC
     return;

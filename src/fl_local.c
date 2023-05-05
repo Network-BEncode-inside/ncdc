@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -46,8 +46,8 @@ guint64           fl_hash_queue_size = 0;
 static fl_list_t *fl_hash_cur = NULL;   // most recent file initiated for hashing
 ratecalc_t        fl_hash_rate;
 static guint64    fl_hash_reset = 0; // increased when fl_hash_cur is removed from the queue (to stop current hash operation)
-static GMutex    *fl_hash_resetlock;
-static GCond     *fl_hash_resetcond;
+static GMutex     fl_hash_resetlock;
+static GCond      fl_hash_resetcond;
 
 #define TTH_BUFSIZE (512*1024)
 
@@ -134,9 +134,10 @@ gboolean fl_flush(gpointer dat) {
   return TRUE;
 }
 
-
-
-
+// are we currently refreshing the share?
+gboolean fl_is_refreshing(void) {
+  return fl_refresh_queue && fl_refresh_queue->head;
+}
 
 // Hash index interface. These operate on fl_hash_index and make sure
 // fl_local_list_size and _length stay correct.
@@ -475,10 +476,10 @@ typedef struct fl_hash_t {
       fl_hash_queue_size -= fl->size;\
       g_hash_table_remove(fl_hash_queue, fl);\
       if((fl) == fl_hash_cur) {\
-        g_mutex_lock(fl_hash_resetlock);\
+        g_mutex_lock(&fl_hash_resetlock);\
         fl_hash_reset++;\
-        g_cond_signal(fl_hash_resetcond);\
-        g_mutex_unlock(fl_hash_resetlock);\
+        g_cond_signal(&fl_hash_resetcond);\
+        g_mutex_unlock(&fl_hash_resetlock);\
       }\
     }\
   } while(0)
@@ -502,14 +503,10 @@ static void fl_hash_queue_delrec(fl_list_t *f) {
 // Returns the allowed burst, or 0 on cancellation.
 static int fl_hash_burst(guint64 lastreset) {
   int b = 0;
-  g_mutex_lock(fl_hash_resetlock);
-  while(fl_hash_reset == lastreset && (b = ratecalc_burst(&fl_hash_rate)) <= 0) {
-    GTimeVal end;
-    g_get_current_time(&end);
-    g_time_val_add(&end, 100*1000); // Wake up every 100ms.
-    g_cond_timed_wait(fl_hash_resetcond, fl_hash_resetlock, &end);
-  }
-  g_mutex_unlock(fl_hash_resetlock);
+  g_mutex_lock(&fl_hash_resetlock);
+  while(fl_hash_reset == lastreset && (b = ratecalc_burst(&fl_hash_rate)) <= 0)
+    g_cond_wait_until(&fl_hash_resetcond, &fl_hash_resetlock, g_get_monotonic_time() + 100*G_TIME_SPAN_MILLISECOND);
+  g_mutex_unlock(&fl_hash_resetlock);
   return b;
 }
 
@@ -984,7 +981,7 @@ static void fl_init_list(fl_list_t *fl) {
 static gboolean fl_init_autorefresh(gpointer dat) {
   int r = var_get_int(0, VAR_autorefresh);
   time_t t = time(NULL);
-  if(r && fl_refresh_last+r < t)
+  if(r && fl_refresh_last+r < t && !fl_is_refreshing() && fl_hash_queue_size == 0)
     fl_refresh(NULL);
   return TRUE;
 }
@@ -1000,8 +997,6 @@ void fl_init() {
   fl_refresh_queue = g_queue_new();
   fl_scan_pool = g_thread_pool_new(fl_scan_thread, NULL, 1, FALSE, NULL);
   fl_hash_pool = g_thread_pool_new(fl_hash_thread, NULL, 1, FALSE, NULL);
-  fl_hash_resetlock = g_mutex_new();
-  fl_hash_resetcond = g_cond_new();
   fl_hash_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
   // Even though the keys are the tth roots, we can just use g_int_hash. The
   // first four bytes provide enough unique data anyway.

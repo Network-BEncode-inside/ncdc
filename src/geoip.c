@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -30,60 +30,67 @@
 gboolean geoip_available = FALSE;
 
 #ifdef USE_GEOIP
-static GeoIP *geoip4;
-static GeoIP *geoip6;
-#endif
 
+#include <maxminddb.h>
 
-void geoip_reinit(int v) {
-#ifdef USE_GEOIP
-  GeoIP **var = v == 4 ? &geoip4 : &geoip6;
-  if(*var) {
-    GeoIP_delete(*var);
-    *var = NULL;
+static MMDB_s *db;
+
+void geoip_reinit() {
+  if(db) {
+    MMDB_close(db);
+    free(db);
+    db = NULL;
+    geoip_available = FALSE;
   }
 
-  const char *fn = var_get(0, v == 4 ? VAR_geoip_cc4 : VAR_geoip_cc6);
-  if(!fn) {
-    /* Get the file paths directly, so that we can offer more useful diagnostic
-     * messages in case we fail to open it. Calling GeoIP_db_avail() ensures that
-     * the GeoIPDBFileName variable has been initialized. */
-    if(!GeoIPDBFileName)
-        GeoIP_db_avail(GEOIP_COUNTRY_EDITION);
-    fn = GeoIPDBFileName[v == 4 ? GEOIP_COUNTRY_EDITION : GEOIP_COUNTRY_EDITION_V6];
-  }
+  const char *fn = var_get(0, VAR_geoip_cc);
+  if(!fn || strcmp(fn, "disabled") == 0)
+    return;
 
-  if(strcmp(fn, "disabled") != 0) {
-    /* The '16' flag is GEOIP_SILENCE, but it's a fairly new option and not
-     * defined in older versions. Just pass it along directly, ABI compatibility
-     * should ensure this works with both old and new versions.
-     * Also perform a g_file_test() first to ensure we're not opening
-     * non-existing files. GeoIP versions that do not support GEOIP_SILENCE
-     * will throw error messages on stdout/stderr, which screws up our ncurses
-     * UI, so catching the most common error here is worth it. */
-    *var = g_file_test(fn, G_FILE_TEST_EXISTS) ? GeoIP_open(fn, 16 | GEOIP_MEMORY_CACHE) : NULL;
-    if(!*var)
-      ui_mf(NULL, 0, "Can't open '%s', no country codes will be displayed for IPv%d addresses.", fn, v);
-  }
+  db = malloc(sizeof(MMDB_s));
+  int status = MMDB_open(fn, 0, db);
 
-  geoip_available = geoip4 || geoip6;
-#endif
+  if(status != MMDB_SUCCESS) {
+    ui_mf(NULL, 0, "Can't open '%s' (%s), no country codes will be displayed.", fn, MMDB_strerror(status));
+    free(db);
+    db = NULL;
+  } else {
+    geoip_available = TRUE;
+  }
+}
+
+const char *geoip_country(const struct sockaddr *const ip) {
+  if(!db)
+    return NULL;
+
+  int status;
+  MMDB_lookup_result_s result = MMDB_lookup_sockaddr(db, ip, &status);
+  if(status != MMDB_SUCCESS) {
+    ui_mf(NULL, 0, "Error looking up IP address: %s", MMDB_strerror(status));
+    return NULL;
+  }
+  if(!result.found_entry)
+    return NULL;
+
+  MMDB_entry_data_s data;
+  status = MMDB_get_value(&result.entry, &data, "country", "iso_code", (void*)NULL);
+  if(status != MMDB_SUCCESS) {
+    ui_mf(NULL, 0, "Error looking up IP address: %s", MMDB_strerror(status));
+    return NULL;
+  }
+  if(!data.has_data || data.type != MMDB_DATA_TYPE_UTF8_STRING)
+    return NULL;
+
+  static char buf[8];
+  memset(buf, 0, sizeof(buf));
+  memcpy(buf, data.utf8_string, data.data_size);
+  return buf;
 }
 
 
-const char *geoip_country4(const char *ip) {
-#ifdef USE_GEOIP
-  if(geoip4)
-    return GeoIP_country_code_by_addr(geoip4, ip);
-#endif
-  return NULL;
-}
+#else /* No GEOIP */
 
+void geoip_reinit() {}
+const char *geoip_country(const struct sockaddr *const ip) { return NULL; }
 
-const char *geoip_country6(const char *ip) {
-#ifdef USE_GEOIP
-  if(geoip6)
-    return GeoIP_country_code_by_addr_v6(geoip6, ip);
 #endif
-  return NULL;
-}

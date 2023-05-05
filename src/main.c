@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -342,6 +342,7 @@ static gboolean sighandle_sourcefunc(gpointer dat) {
   }
   if(main_sig_log) {
     logfile_global_reopen();
+    geoip_reinit();
     main_sig_log = FALSE;
   }
   return TRUE;
@@ -376,29 +377,6 @@ static GOptionEntry cli_options[] = {
 
 
 
-#ifdef USE_GCRYPT
-/* These hacks with static exist to trick makeheaders into not copying the
- * gcrypt macro into the header file. It does cause some of the functions to be
- * exported, but they're pretty unique anyway. */
-#define static
-static GCRY_THREAD_OPTION_PTHREAD_IMPL;
-#undef static
-#endif
-
-static void init_crypt() {
-#ifdef USE_GCRYPT
-  gcry_control(GCRYCTL_SET_THREAD_CBS, &gcry_threads_pthread);
-  if(!gcry_check_version(GCRYPT_VERSION)) {
-    fputs("libgcrypt version mismatch\n", stderr);
-    exit(1);
-  }
-  gcry_control(GCRYCTL_ENABLE_QUICK_RANDOM);
-  gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
-#endif
-  gnutls_global_init();
-}
-
-
 int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
   // Early logging goes to stderr
@@ -423,8 +401,7 @@ int main(int argc, char **argv) {
   }
 
   // init stuff
-  init_crypt();
-  g_thread_init(NULL);
+  gnutls_global_init();
 
   // Create main loop
   main_loop = g_main_loop_new(NULL, FALSE);
@@ -453,8 +430,7 @@ int main(int argc, char **argv) {
   dl_init_global();
   ui_cmdhist_init("history");
   ui_init(bracketed_paste);
-  geoip_reinit(4);
-  geoip_reinit(6);
+  geoip_reinit();
 
   // setup SIGWINCH
   struct sigaction act;

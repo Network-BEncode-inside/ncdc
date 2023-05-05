@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -191,7 +191,6 @@ static char *t_title(ui_tab_t *tab) {
 }
 
 
-// TODO: mark already shared and queued files?
 static void draw_row(ui_listing_t *list, GSequenceIter *iter, int row, void *dat) {
   search_r_t *r = g_sequence_get(iter);
   tab_t *t = dat;
@@ -221,12 +220,14 @@ static void draw_row(ui_listing_t *list, GSequenceIter *iter, int row, void *dat
   else
     mvaddstr(row, i+16, "  -");
 
+  mvaddch(row, i+20, ui_file_flag(r->tth));
+
   char *fn = strrchr(r->file, '/');
   if(fn)
     fn++;
   else
     fn = r->file;
-  mvaddnstr(row, i+21, fn, str_offset_from_columns(fn, wincols-i-21));
+  mvaddnstr(row, i+22, fn, str_offset_from_columns(fn, wincols-i-22));
 
   attroff(iter == list->sel ? UIC(list_select) : UIC(list_default));
 }
@@ -243,7 +244,8 @@ static void t_draw(ui_tab_t *tab) {
   int i = t->hide_hub ? 22 : 36;
   mvaddstr(1, i,    "Size");
   mvaddstr(1, i+12, "Slots");
-  mvaddstr(1, i+21, "File");
+  mvaddstr(1, i+20, "F"); // short for "Flags"
+  mvaddstr(1, i+22, "File");
   attroff(UIC(list_header));
 
   int bottom = winrows-4;

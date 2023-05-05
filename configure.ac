@@ -1,7 +1,7 @@
 
-AC_INIT([ncdc], [1.19.1], [projects@yorhel.nl])
+AC_INIT([ncdc],[1.23.1],[projects@yorhel.nl])
 AC_CONFIG_SRCDIR([src/ncdc.h])
-AC_CONFIG_HEADER([config.h])
+AC_CONFIG_HEADERS([config.h])
 m4_include([deps/lean.m4])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 PKG_PROG_PKG_CONFIG([0.18])
@@ -29,12 +29,6 @@ AM_CONDITIONAL([HAVE_MH], [test "x$have_mh" = "xyes"])
 
 # Check for header files.
 AC_CHECK_HEADERS([zlib.h bzlib.h],[], AC_MSG_ERROR([Required header file not found]))
-
-have_nch=no
-AC_CHECK_HEADERS([ncursesw/ncurses.h ncurses/ncurses.h ncurses.h],[have_nch=yes])
-if test "x$have_nch" = "xno"; then
-  AC_MSG_ERROR([Could not find a header files for ncurses.])
-fi
 
 
 # Check for posix_fadvise()
@@ -95,15 +89,11 @@ esac
 
 
 # Check for ncurses
-AC_CHECK_LIB([ncursesw], [get_wch], [
-    AC_SUBST([NCURSES_LIBS],[-lncursesw])
-  ], [
-    AC_CHECK_LIB([ncurses],
-                 [get_wch],
-                 [AC_SUBST([NCURSES_LIBS],[-lncurses])],
-                 [AC_MSG_ERROR(ncursesw library is required)])
-  ]
-)
+PKG_CHECK_MODULES(NCURSES, ncursesw,,[
+    PKG_CHECK_MODULES(NCURSES, ncurses,,[
+	AC_MSG_ERROR(ncurses library is required)
+    ])
+])
 
 # Check for zlib
 AC_CHECK_LIB([z],
@@ -131,35 +121,21 @@ PKG_CHECK_EXISTS([sqlite3],[
 )
 
 # Check for modules
-PKG_CHECK_MODULES([GLIB],   [glib-2.0 >= 2.24 gthread-2.0])
-PKG_CHECK_MODULES([GNUTLS], [gnutls >= 2.4])
+PKG_CHECK_MODULES([GLIB],   [glib-2.0 >= 2.32 gthread-2.0])
+PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.0])
 AC_ARG_WITH([geoip],
             [AS_HELP_STRING([--with-geoip], [support for IP-to-country lookups @<:@default=no@:>@])],
             [],
             [with_geoip=no])
-AS_IF([test "x$with_geoip" == xyes],
+AS_IF([test "x$with_geoip" = xyes],
       [PKG_CHECK_MODULES([GEOIP],
-                         [geoip >= 1.2.0],
-                         [AC_DEFINE(USE_GEOIP, 1, [Use libgeoip for IP-to-country lookups])])])
-
-
-# Note that GnuTLS 2.12 also supports the nettle backend, and already provides
-# an API to the low-level crypto functions. However, if GnuTLS uses the gcrypt
-# backend, we still need to initialize gcrypt for threading. Since we have no
-# reliable way to detect which backend is used, let's just assume gcrypt. And
-# while we're linking against gcrypt anyway, we might as well use it for
-# crypto, too.
-PKG_CHECK_EXISTS([gnutls >= 3.0], [], [
-  AC_CHECK_LIB([gcrypt],
-               [gcry_control],
-               [AC_SUBST([GCRYPT_LIBS], [-lgcrypt])],
-               [AC_MSG_ERROR([GnuTLS version is older than 3.0, but no libgcrypt found])])
-  AC_DEFINE(USE_GCRYPT, 1, [Define to use libgcrypt for crypto])
-])
+                         [libmaxminddb >= 1.0],
+                         [AC_DEFINE(USE_GEOIP, 1, [Use libmaxminddb for IP-to-country lookups])])])
 
 
 
-# Check whether we should use the version string from AC_INIT(), or use
+
+# Check whether we should use the version string from AC_INIT, or use
 # git-describe to create one. This trick is copied from the pacman source.
 
 AC_ARG_ENABLE(git-version,
@@ -188,4 +164,5 @@ fi
 AM_CONDITIONAL([INSTALL_MANPAGE], [test "x$installmanpage" = "xyes"])
 
 
-AC_OUTPUT([Makefile])
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT

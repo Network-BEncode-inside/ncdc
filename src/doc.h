@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -404,6 +404,12 @@ static const doc_set_t doc_sets[] = {
   "Minimum segment size to use when requesting file data from another user."
   " Set to 0 to disable segmented downloading."
 },
+{
+  "download_shared", 0, "<boolean>",
+  "Whether to download files which are already present in your share. When this"
+  " is set to `false', adding already shared files results in a UI message"
+  " instead of adding the file to the download queue."
+},
 { "download_slots", 0, "<integer>",
   "Maximum number of simultaneous downloads."
 },
@@ -439,13 +445,10 @@ static const doc_set_t doc_sets[] = {
   " your system for other things besides ncdc, you share large files (>100MB)"
   " and people are not constantly downloading the same file from you."
 },
-{ "geoip_cc4", 0, "<path>|disabled",
-  "Path to the GeoIP Country database file for IPv4, or 'disabled' to disable"
-  " GeoIP lookup for IPv4 addresses."
-},
-{ "geoip_cc6", 0, "<path>|disabled",
-  "Path to the GeoIP Country database file for IPv6, or 'disabled' to disable"
-  " GeoIP lookup for IPv6 addresses."
+{ "geoip_cc", 0, "<path>|disabled",
+  "Path to the GeoIP2 Country database file (GeoLite2-Country.mmdb), or"
+  " 'disabled' to disable GeoIP lookups. The database can be downloaded "
+  " from https://dev.maxmind.com/geoip/geoip2/geolite2/."
 },
 { "hash_rate", 0, "<speed>",
   "Maximum file hashing speed. See the `download_rate' setting for allowed"
@@ -489,6 +492,10 @@ static const doc_set_t doc_sets[] = {
 },
 { "log_uploads", 0, "<boolean>",
   "Log file uploads to transfers.log."
+},
+{
+  "max_ul_per_user", 0, "<integer>",
+  "The maximum number of simultaneous upload connections to one user."
 },
 { "minislots", 0, "<integer>",
   "Set the number of available minislots. A `minislot' is a special slot that"
@@ -559,6 +566,11 @@ static const doc_set_t doc_sets[] = {
   " enabled, any symlinks in your shared directories will be followed, even"
   " when they point to a directory outside your share."
 },
+{
+  "show_free_slots", 1, "<boolean>",
+  "When set to true, [n sl] will be prepended to your description, where n is"
+  " the number of currently available upload slots."
+},
 { "show_joinquit", 1, "<boolean>",
   "Whether to display join/quit messages in the hub chat."
 },
@@ -579,18 +591,17 @@ static const doc_set_t doc_sets[] = {
   " note that, even if you set this to `prefer', encryption is still only used"
   " when the client on the other side of the connection also supports it."
 },
-{ "tls_policy", 1, "<disabled|allow|prefer>",
+{ "tls_policy", 1, "<disabled|allow|prefer|force>",
   "Set the policy for secure client-to-client connections. Setting this to"
   " `disabled' disables TLS support for client connections, but still allows"
   " you to connect to TLS-enabled hubs. `allow' will allow the use of TLS if"
   " the other client requests this, but ncdc itself will not request TLS when"
-  " connecting to others. Setting this to `prefer' tells ncdc to also request"
-  " TLS when connecting to others.\n\n"
+  " connecting to others, `prefer' tells ncdc to request TLS when connecting to"
+  " others. Setting this to 'force' will disallow non-TLS connections and also"
+  " requires that the hub connection itself is TLS.\n\n"
   "The use of TLS for client connections usually results in less optimal"
   " performance when uploading and downloading, but is quite effective at"
-  " avoiding protocol-specific traffic shaping that some ISPs may do. Also note"
-  " that, even if you set this to `prefer', TLS will only be used if the"
-  " connecting party also supports it."
+  " avoiding protocol-specific traffic shaping that some ISPs may do."
 },
 { "tls_priority", 0, "<string>",
   "Set the GnuTLS priority string used for all TLS-enabled connections. See the"
@@ -695,7 +706,8 @@ static const doc_key_t doc_keys[] = {
   "i/Return     Toggle information box.\n"
   "f            Find user in user list.\n"
   "m            Send a PM to the selected user.\n"
-  "q            Find file in download queue."
+  "q            Find file in download queue.\n"
+  "b/B          Browse the selected user's list, B to force a redownload."
 },
 { "queue", "Download queue",
   LISTING_KEYS
@@ -719,7 +731,7 @@ static const doc_key_t doc_keys[] = {
 { "search", "Search results tab",
   LISTING_KEYS
   "f            Find user in user list.\n"
-  "b/B          Browse the selected users' list, B to force a redownload.\n"
+  "b/B          Browse the selected user's list, B to force a redownload.\n"
   "d            Add selected file to the download queue.\n"
   "h            Toggle hub column visibility.\n"
   "u            Order by username.\n"

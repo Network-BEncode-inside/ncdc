@@ -1,6 +1,6 @@
 /* ncdc - NCurses Direct Connect client
 
-  Copyright (c) 2011-2014 Yoran Heling
+  Copyright (c) 2011-2022 Yoran Heling
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -386,7 +386,7 @@ static char *i_cid_pid() {
 
   // Generate a random PID
   char pid[24];
-  crypt_rnd(pid, 24);
+  g_warn_if_fail(gnutls_rnd(GNUTLS_RND_RANDOM, pid, 24) == 0);
 
   // now hash the PID so we have our CID
   char cid[24];
@@ -613,9 +613,8 @@ static char *i_ffc() {
 
 static gboolean s_geoip_cc(guint64 hub, const char *key, const char *val, GError **err) {
 #ifdef USE_GEOIP
-  int v = strcmp(key, "geoip_cc4") == 0 ? 4 : 6;
   db_vars_set(hub, key, val);
-  geoip_reinit(v);
+  geoip_reinit();
   return TRUE;
 #else
   g_set_error(err, 1, 0, "This option can't be modified: %s.", "Ncdc has not been compiled with GeoIP support");
@@ -743,12 +742,14 @@ static char *p_sendfile(const char *val, GError **err) {
 #define VAR_TLSP_DISABLE 1
 #define VAR_TLSP_ALLOW   2
 #define VAR_TLSP_PREFER  4
+#define VAR_TLSP_FORCE   8
 #endif
 
 static flag_option_t var_tls_policy_ops[] = {
   { VAR_TLSP_DISABLE, "disabled" },
   { VAR_TLSP_ALLOW,   "allow"    },
   { VAR_TLSP_PREFER,  "prefer"   },
+  { VAR_TLSP_FORCE,   "force"    },
   { 0 }
 };
 
@@ -962,14 +963,14 @@ struct var_t {
   V(download_exclude, 1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
   V(download_rate,    1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)\
   V(download_segment, 1,0, f_download_segment,p_download_segment,NULL,     NULL,         NULL,            g_strdup_printf("%"G_GUINT64_FORMAT, (guint64)DLFILE_CHUNKSIZE))\
+  V(download_shared,  1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
   V(download_slots,   1,0, f_int,          p_int,           NULL,          NULL,         s_download_slots,"3")\
   V(email,            1,1, f_id,           p_id,            su_old,        NULL,         s_hubinfo,       NULL)\
   V(encoding,         1,1, f_id,           p_encoding,      su_encoding,   NULL,         NULL,            "UTF-8")\
   V(filelist_maxage,  1,0, f_interval,     p_interval,      su_old,        NULL,         NULL,            "604800")\
   V(fl_done,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            "false")\
   V(flush_file_cache, 1,0, f_ffc,          p_ffc,           su_ffc,        g_ffc,        s_ffc,           i_ffc())\
-  V(geoip_cc4,        1,0, f_id,           p_id,            su_path,       NULL,         s_geoip_cc,      NULL)\
-  V(geoip_cc6,        1,0, f_id,           p_id,            su_path,       NULL,         s_geoip_cc,      NULL)\
+  V(geoip_cc,         1,0, f_id,           p_id,            su_path,       NULL,         s_geoip_cc,      NULL)\
   V(hash_rate,        1,0, f_speed,        p_speed,         NULL,          NULL,         NULL,            NULL)\
   V(hubaddr,          0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
   V(hubkp,            0,0, NULL,           NULL,            NULL,          NULL,         NULL,            NULL)\
@@ -980,6 +981,7 @@ struct var_t {
   V(log_downloads,    1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
   V(log_hubchat,      1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
   V(log_uploads,      1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "true")\
+  V(max_ul_per_user,  1,1, f_int,          p_int_ge1,       NULL,          NULL,         NULL,            "1")\
   V(minislots,        1,0, f_int,          p_int_ge1,       NULL,          NULL,         NULL,            "3")\
   V(minislot_size,    1,0, f_minislot_size,p_minislot_size, NULL,          NULL,         NULL,            "65536")\
   V(nick,             1,1, f_id,           p_nick,          su_old,        NULL,         s_nick,          i_nick())\
@@ -992,6 +994,7 @@ struct var_t {
   V(share_exclude,    1,0, f_id,           p_regex,         su_old,        NULL,         NULL,            NULL)\
   V(share_hidden,     1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(share_symlinks,   1,0, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
+  V(show_free_slots,  1,1, f_bool,         p_bool,          su_bool,       NULL,         s_hubinfo,       "false")\
   V(show_joinquit,    1,1, f_bool,         p_bool,          su_bool,       NULL,         NULL,            "false")\
   V(slots,            1,0, f_int,          p_int_ge1,       NULL,          NULL,         s_hubinfo,       "10")\
   V(sudp_policy,      1,0, f_sudp_policy,  p_sudp_policy,   su_sudp_policy,g_sudp_policy,s_sudp_policy,   G_STRINGIFY(VAR_SUDPP_PREFER))\

@@ -1,3 +1,41 @@
+1.23.1 - 2022-09-27
+	- Fix buffer overflow on connections tab for incoming IPv6 connections in handshake phase
+
+1.23 - 2022-05-30
+	- Bump minimum glib version to 2.32
+	- Re-open GeoIP database on SIGUSR1
+	- Add tls_policy=force setting
+	- Fix TLS on Verlihub
+	- Various minor language fixes
+	- Add workaround rare compiler bug for aarch64
+
+1.22.1 - 2019-06-03
+	- Fix segfault with ADC client connections
+
+1.22 - 2019-04-30
+	- Add 'b' and 'B' keys to connections tab (Daniel Kamil Kozar)
+	- Add 'max_ul_per_user' setting to support multiple upload slots per user (Daniel Kamil Kozar)
+	- Add support for TLS ALPN (Denys Smirnov)
+	- Fix build against ncurses with separate libtinfo (Lars Wendler)
+
+1.21 - 2019-03-26
+	- Switch to libmaxminddb for GeoIP lookups
+	- Replaced 'geoip_cc4' and 'geoip_cc6' settings with a single 'geoip_cc'
+	- Mark already queued or shared files in search and file browser (Daniel Kamil Kozar)
+	- Add 'download_shared' setting (Daniel Kamil Kozar)
+	- Add 'show_free_slots' setting (Daniel Kamil Kozar)
+	- Add support for the "Free Slots" ADC extension
+
+1.20 - 2016-12-30
+	- Support bracketed paste mode in input handling (cologic)
+	- Add 'geoip_cc4' and 'geoip_cc6' settings
+	- Add 'log_hubchat' setting
+	- Add 'local' option to 'active_ip' setting
+	- Add support for multistream bzip2 filelists
+	- Disable RC4 ciphers by default from tls_priority
+	- Fix potential null pointer deference
+	- Fix chmod of destination directories (Johannes Beisswenger)
+
 1.19.1 - 2014-04-23
 	- Fix remote null pointer dereference
 	- Searching now works in the search results list
